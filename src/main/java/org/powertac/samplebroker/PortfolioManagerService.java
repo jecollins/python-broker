@@ -350,6 +350,36 @@ implements PortfolioManager, Initializable, Activatable
         }
       }
     }
+    
+    if (timeslotIndex % (4*24) == 0) {
+      // remember that market prices are per mwh, but tariffs are by kwh
+      double marketPrice = marketManager.getMeanMarketPrice() / 1000.0;
+      // for each power type representing a customer population,
+      // create a tariff that's better than what's available
+      for (PowerType pt : customerProfiles.keySet()) {
+        // we'll just do fixed-rate tariffs for now
+        double rateValue;
+        if (pt.isConsumption())
+          rateValue = ((marketPrice + fixedPerKwh) * (1.0 + defaultMargin));
+        else
+          //rateValue = (-1.0 * marketPrice / (1.0 + defaultMargin));
+          rateValue = -1.0 * marketPrice;
+        if (pt.isInterruptible())
+          rateValue *= 0.7; // Magic number!! price break for interruptible
+        TariffSpecification spec =
+                new TariffSpecification(broker.getBroker(), pt)
+        .withPeriodicPayment(defaultPeriodicPayment);
+        Rate rate = new Rate().withValue(rateValue);
+        if (pt.isInterruptible()) {
+          // set max curtailment
+          rate.withMaxCurtailment(0.1);
+        }
+        spec.addRate(rate);
+        customerSubscriptions.put(spec, new HashMap<CustomerInfo, CustomerRecord>());
+        tariffRepo.addSpecification(spec);
+        broker.sendMessage(spec);
+      }
+    }
   }
 
   // ------------- test-support methods ----------------
