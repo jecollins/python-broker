@@ -35,6 +35,7 @@ import org.powertac.common.Tariff;
 import org.powertac.common.TariffSpecification;
 import org.powertac.common.TariffTransaction;
 import org.powertac.common.TimeService;
+import org.powertac.common.Timeslot;
 import org.powertac.common.config.ConfigurableValue;
 import org.powertac.common.enumerations.PowerType;
 import org.powertac.common.msg.BalancingControlEvent;
@@ -110,21 +111,24 @@ implements PortfolioManager, Initializable, Activatable
 
   // These customer records need to be notified on activation
   private List<CustomerRecord> notifyOnActivation = new ArrayList<>();
+  
+  private Map<Integer, Map<String, List<Object>>> pendingMessages;
+
 
   // Configurable parameters for tariff composition
   // Override defaults in src/main/resources/config/broker.config
   // or in top-level config file
-  @ConfigurableValue(valueType = "Double",
-          description = "target profit margin")
-  private double defaultMargin = 0.5;
+  //@ConfigurableValue(valueType = "Double",
+  //        description = "target profit margin")
+  //private double defaultMargin = 0.5;
 
-  @ConfigurableValue(valueType = "Double",
-          description = "Fixed cost/kWh")
-  private double fixedPerKwh = -0.06;
+  //@ConfigurableValue(valueType = "Double",
+  //        description = "Fixed cost/kWh")
+  //private double fixedPerKwh = -0.06;
 
-  @ConfigurableValue(valueType = "Double",
-          description = "Default daily meter charge")
-  private double defaultPeriodicPayment = -1.0;
+  //@ConfigurableValue(valueType = "Double",
+  //        description = "Default daily meter charge")
+  //private double defaultPeriodicPayment = -1.0;
 
   /**
    * Default constructor.
@@ -234,6 +238,30 @@ implements PortfolioManager, Initializable, Activatable
   }
 
   // -------------- Message handlers -------------------
+  // Adds a message to the correct pendingMessage list
+  private void addPendingMessage (String type, Object msg)
+  {
+    int current = timeslotRepo.currentSerialNumber();
+    Map<String, List<Object>> map = pendingMessages.get(current);
+    if (null == map) {
+      pendingMessages.put(current, new HashMap<String, List<Object>>());
+    }
+    List<Object> msgs = pendingMessages.get(current).get(type);
+    if (null == msgs) {
+      msgs = new ArrayList<Object>();
+      pendingMessages.get(current).put(type, msgs);
+    }
+    msgs.add(msg);
+  }
+
+  /**
+   * Retrieves pending messages for the current timeslot.
+   */
+  public Map<String, List<Object>> getPendingMessageLists ()
+  {
+    return pendingMessages.get(timeslotRepo.currentSerialNumber());
+  }
+  
   /**
    * Handles CustomerBootstrapData by populating the customer model 
    * corresponding to the given customer and power type. This gives the
@@ -392,171 +420,24 @@ implements PortfolioManager, Initializable, Activatable
   @Override // from Activatable
   public synchronized void activate (int timeslotIndex)
   {
-    if (customerSubscriptions.size() == 0) {
-      // we (most likely) have no tariffs
-      createInitialTariffs();
-    }
-    else {
-      // we have some, are they good enough?
-      improveTariffs();
-    }
+    // This is where we respond to the next-timeslot request by notifying waiting threads
     for (CustomerRecord record: notifyOnActivation)
       record.activate();
+    notifyAll();
   }
   
-  // Creates initial tariffs for the main power types. These are simple
-  // fixed-rate two-part tariffs that give the broker a fixed margin.
-  private void createInitialTariffs ()
+  /**
+   * Come here to wait for activation
+   */
+  public void waitForActivation ()
   {
-    // remember that market prices are per mwh, but tariffs are by kwh
-    double marketPrice = marketManager.getMeanMarketPrice() / 1000.0;
-    // for each power type representing a customer population,
-    // create a tariff that's better than what's available
-    for (PowerType pt : customerProfiles.keySet()) {
-      // we'll just do fixed-rate tariffs for now
-      benchmarkPrice = ((marketPrice + fixedPerKwh) * (1.0 + defaultMargin));
-      double rateValue = benchmarkPrice;
-      double periodicValue = defaultPeriodicPayment;
-      if (pt.isProduction()) {
-        rateValue = -2.0 * marketPrice;
-        periodicValue /= 2.0;
-      }
-      //if (pt.isStorage()) {
-      //  rateValue *= 0.9; // Magic number
-      //  periodicValue = 0.0;
-      //}
-      if (pt.isInterruptible()) {
-        rateValue *= 0.7; // Magic number!! price break for interruptible
-      }
-      //log.info("rateValue = {} for pt {}", rateValue, pt);
-      log.info("Tariff {}: rate={}, periodic={}", pt, rateValue, periodicValue);
-      TariffSpecification spec =
-          new TariffSpecification(brokerContext.getBroker(), pt)
-              .withPeriodicPayment(periodicValue);
-      Rate rate = new Rate().withValue(rateValue);
-      if (pt.isInterruptible() && !pt.isStorage()) {
-        // set max curtailment
-        rate.withMaxCurtailment(0.4);
-      }
-      if (pt.isStorage()) {
-        // add a RegulationRate
-        RegulationRate rr = new RegulationRate();
-        rr.withUpRegulationPayment(-rateValue * 1.45)
-            .withDownRegulationPayment(rateValue * 0.5); // magic numbers
-        spec.addRate(rr);
-      }
-      spec.addRate(rate);
-      customerSubscriptions.put(spec, new LinkedHashMap<>());
-      tariffRepo.addSpecification(spec);
-      brokerContext.sendMessage(spec);
+    try {
+      wait();
+    } catch (InterruptedException ie) {
+      log.error("Interrupted during timeslot {}", timeslotRepo.currentSerialNumber());
     }
   }
-
-  // Checks to see whether our tariffs need fine-tuning
-  private void improveTariffs()
-  {
-    // quick magic-number hack to inject a balancing order
-    int timeslotIndex = timeslotRepo.currentTimeslot().getSerialNumber();
-    if (371 == timeslotIndex) {
-      for (TariffSpecification spec :
-           tariffRepo.findTariffSpecificationsByBroker(brokerContext.getBroker())) {
-        if (PowerType.INTERRUPTIBLE_CONSUMPTION == spec.getPowerType()) {
-          BalancingOrder order = new BalancingOrder(brokerContext.getBroker(),
-                                                    spec, 
-                                                    0.5,
-                                                    spec.getRates().get(0).getMinValue() * 0.9);
-          brokerContext.sendMessage(order);
-        }
-      }
-      // add a battery storage tariff with overpriced regulation
-      // should get few subscriptions...
-      TariffSpecification spec = 
-              new TariffSpecification(brokerContext.getBroker(),
-                                      PowerType.BATTERY_STORAGE);
-      Rate rate = new Rate().withValue(benchmarkPrice * 0.9);
-      spec.addRate(rate);
-      RegulationRate rr = new RegulationRate();
-      rr.withUpRegulationPayment(10.0)  // huge payment
-      .withDownRegulationPayment(0.00); // free energy
-      spec.addRate(rr);
-      tariffRepo.addSpecification(spec);
-      brokerContext.sendMessage(spec);
-      // add a battery storage tariffs slightly better and slightly worse than the original
-      spec = new TariffSpecification(brokerContext.getBroker(),
-                                     PowerType.BATTERY_STORAGE);
-      rate = new Rate().withValue(benchmarkPrice * 0.7);
-      spec.addRate(rate);
-      rr = new RegulationRate();
-      rr.withUpRegulationPayment(-benchmarkPrice * 0.7 * 1.4)
-          .withDownRegulationPayment(benchmarkPrice * 0.7 * 0.54); // magic numbers
-      spec.addRate(rr);
-      tariffRepo.addSpecification(spec);
-      brokerContext.sendMessage(spec);
-      //
-      spec = new TariffSpecification(brokerContext.getBroker(),
-                                     PowerType.BATTERY_STORAGE);
-      rate = new Rate().withValue(benchmarkPrice * 0.7);
-      spec.addRate(rate);
-      rr = new RegulationRate();
-      rr.withUpRegulationPayment(-benchmarkPrice * 0.7 * 1.5)
-          .withDownRegulationPayment(benchmarkPrice * 0.7 * 0.46); // magic numbers
-      spec.addRate(rr);
-      tariffRepo.addSpecification(spec);
-      brokerContext.sendMessage(spec);
-
-    }
-    // magic-number hack to supersede a tariff
-    if (380 == timeslotIndex) {
-      // find the existing CONSUMPTION tariff
-      TariffSpecification oldc = null;
-      List<TariffSpecification> candidates =
-        tariffRepo.findTariffSpecificationsByBroker(brokerContext.getBroker());
-      if (null == candidates || 0 == candidates.size())
-        log.error("No tariffs found for broker");
-      else {
-        // oldc = candidates.get(0);
-        for (TariffSpecification candidate: candidates) {
-          if (candidate.getPowerType() == PowerType.CONSUMPTION) {
-            oldc = candidate;
-            break;
-          }
-        }
-        if (null == oldc) {
-          log.warn("No CONSUMPTION tariffs found");
-        }
-        else {
-          double rateValue = oldc.getRates().get(0).getValue();
-          // create a new CONSUMPTION tariff
-          TariffSpecification spec =
-            new TariffSpecification(brokerContext.getBroker(),
-                                    PowerType.CONSUMPTION)
-                .withPeriodicPayment(defaultPeriodicPayment * 1.1);
-          Rate rate = new Rate().withValue(rateValue);
-          spec.addRate(rate);
-          if (null != oldc)
-            spec.addSupersedes(oldc.getId());
-          //mungId(spec, 6);
-          tariffRepo.addSpecification(spec);
-          brokerContext.sendMessage(spec);
-          // revoke the old one
-          TariffRevoke revoke =
-            new TariffRevoke(brokerContext.getBroker(), oldc);
-          brokerContext.sendMessage(revoke);
-        }
-      }
-    }
-    // Exercise economic controls every 4 timeslots
-    if ((timeslotIndex % 4) == 3) {
-      List<TariffSpecification> candidates =
-              tariffRepo.findTariffSpecificationsByPowerType(PowerType.INTERRUPTIBLE_CONSUMPTION);
-      for (TariffSpecification spec: candidates) {
-        EconomicControlEvent ece =
-                new EconomicControlEvent(spec, 0.2, timeslotIndex + 1);
-        brokerContext.sendMessage(ece);
-      }
-    }
-  }
-
+  
   // ------------- test-support methods ----------------
   double getUsageForCustomer (CustomerInfo customer,
                               TariffSpecification tariffSpec,

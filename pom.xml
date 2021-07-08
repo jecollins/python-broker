@@ -5,11 +5,11 @@
 
   <modelVersion>4.0.0</modelVersion>
 
-  <artifactId>sample-broker</artifactId>
+  <artifactId>passthrough-broker</artifactId>
   <packaging>jar</packaging>
 
-  <name>sample-broker</name>
-  <description>Standalone or server-resident sample broker implementation</description>
+  <name>passthrough-broker</name>
+  <description>Pass-through broker implementation</description>
   <url>http://www.powertac.org/</url>
 
   <parent>

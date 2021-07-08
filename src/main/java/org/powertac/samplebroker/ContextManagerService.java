@@ -16,11 +16,20 @@
 package org.powertac.samplebroker;
 
 import org.apache.logging.log4j.Logger;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.logging.log4j.LogManager;
 import org.powertac.common.BankTransaction;
 import org.powertac.common.CashPosition;
 import org.powertac.common.Competition;
+import org.powertac.common.Timeslot;
+import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.DistributionReport;
+import org.powertac.common.repo.TimeslotRepo;
 import org.powertac.samplebroker.core.BrokerPropertiesService;
 import org.powertac.samplebroker.interfaces.BrokerContext;
 import org.powertac.samplebroker.interfaces.Initializable;
@@ -40,10 +49,16 @@ implements Initializable
   @Autowired
   private BrokerPropertiesService propertiesService;
 
+  @Autowired
+  private TimeslotRepo timeslotRepo;
+
   BrokerContext master;
 
   // current cash balance
   private double cash = 0;
+
+  // Stored messages
+  private Map<Integer, Map<String, Object>> pendingMessages;
   
 
 //  @SuppressWarnings("unchecked")
@@ -52,28 +67,21 @@ implements Initializable
   {
     master = broker;
     propertiesService.configureMe(this);
-// --- no longer needed ---
-//    for (Class<?> clazz: Arrays.asList(BankTransaction.class,
-//                                       CashPosition.class,
-//                                       DistributionReport.class,
-//                                       Competition.class,
-//                                       java.util.Properties.class)) {
-//      broker.registerMessageHandler(this, clazz);
-//    }    
+    pendingMessages = new HashMap<>();
   }
 
   // -------------------- message handlers ---------------------
   //
   // Note that these arrive in JMS threads; If they share data with the
   // agent processing thread, they need to be synchronized.
-  
+
   /**
    * BankTransaction represents an interest payment. Value is positive for 
    * credit, negative for debit. 
    */
   public void handleMessage (BankTransaction btx)
   {
-    // TODO - handle this
+    postSingletonMessage("BankTransaction", btx); // should be only one
   }
 
   /**
@@ -81,6 +89,7 @@ implements Initializable
    */
   public void handleMessage (CashPosition cp)
   {
+    postSingletonMessage("CashPosition", cp);
     cash = cp.getBalance();
     log.info("Cash position: " + cash);
   }
@@ -91,7 +100,7 @@ implements Initializable
    */
   public void handleMessage (DistributionReport dr)
   {
-    // TODO - use this data
+    postSingletonMessage("DistributionReport", dr);
   }
   
   /**
@@ -101,7 +110,12 @@ implements Initializable
    */
   public void handleMessage (Competition comp)
   {
-    // TODO - process competition properties
+    postSingletonMessage("Competition", comp);
+  }
+
+  public synchronized void handleMessage (CustomerBootstrapData cbd)
+  {
+    postSingletonMessage("CustomerBootstrapData", cbd);
   }
 
   /**
@@ -109,6 +123,19 @@ implements Initializable
    */
   public void handleMessage (java.util.Properties serverProps)
   {
-    // TODO - adapt to the server setup.
+    postSingletonMessage("Properties", serverProps);
+  }
+
+  private void postSingletonMessage(String type, Object msg)
+  {
+    pendingMessages.get(timeslotRepo.currentSerialNumber()).put(type, msg); // should be only one
+  }
+  
+  /**
+   * Returns the <type message> map for the current timeslot.
+   */
+  public Map<String, Object> getContextMessages ()
+  {
+    return pendingMessages.get(timeslotRepo.currentTimeslot());
   }
 }
