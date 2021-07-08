@@ -107,11 +107,12 @@ implements PortfolioManager, Initializable, Activatable
 
   // Keep track of a benchmark price to allow for comparisons between
   // tariff evaluations
-  private double benchmarkPrice = 0.0;
+  //private double benchmarkPrice = 0.0;
 
   // These customer records need to be notified on activation
   private List<CustomerRecord> notifyOnActivation = new ArrayList<>();
   
+  // Map for recording per-timeslot messages
   private Map<Integer, Map<String, List<Object>>> pendingMessages;
 
 
@@ -238,34 +239,13 @@ implements PortfolioManager, Initializable, Activatable
   }
 
   // -------------- Message handlers -------------------
-  // Adds a message to the correct pendingMessage list
-  private void addPendingMessage (String type, Object msg)
-  {
-    int current = timeslotRepo.currentSerialNumber();
-    Map<String, List<Object>> map = pendingMessages.get(current);
-    if (null == map) {
-      pendingMessages.put(current, new HashMap<String, List<Object>>());
-    }
-    List<Object> msgs = pendingMessages.get(current).get(type);
-    if (null == msgs) {
-      msgs = new ArrayList<Object>();
-      pendingMessages.get(current).put(type, msgs);
-    }
-    msgs.add(msg);
-  }
-
-  /**
-   * Retrieves pending messages for the current timeslot.
-   */
-  public Map<String, List<Object>> getPendingMessageLists ()
-  {
-    return pendingMessages.get(timeslotRepo.currentSerialNumber());
-  }
-  
   /**
    * Handles CustomerBootstrapData by populating the customer model 
    * corresponding to the given customer and power type. This gives the
    * broker a running start.
+   * 
+   * Note that this message type is recorded in the ContextManager; here we just want to initialize
+   * our customer records.
    */
   public synchronized void handleMessage (CustomerBootstrapData cbd)
   {
@@ -305,6 +285,7 @@ implements PortfolioManager, Initializable, Activatable
       addCompetingTariff(spec);
       tariffRepo.addSpecification(spec);
     }
+    addPendingMessage("TariffSpecification", spec);
   }
 
   /**
@@ -314,6 +295,7 @@ implements PortfolioManager, Initializable, Activatable
   public synchronized void handleMessage (TariffStatus ts)
   {
     log.info("TariffStatus: " + ts.getStatus());
+    addPendingMessage("TariffStatus", ts);
   }
 
   /**
@@ -322,19 +304,25 @@ implements PortfolioManager, Initializable, Activatable
    */
   public synchronized void handleMessage(TariffTransaction ttx)
   {
+    boolean ignore = false;
     // make sure we have this tariff
     TariffSpecification newSpec = ttx.getTariffSpec();
     if (newSpec == null) {
       log.error("TariffTransaction type=" + ttx.getTxType()
                 + " for unknown spec");
+      ignore = true;
     }
     else {
       TariffSpecification oldSpec =
               tariffRepo.findSpecificationById(newSpec.getId());
       if (oldSpec != newSpec) {
         log.error("Incoming spec " + newSpec.getId() + " not matched in repo");
+        ignore = true;
       }
     }
+    if (!ignore)
+      addPendingMessage("TariffTransaction", ttx);
+
     TariffTransaction.Type txType = ttx.getTxType();
     CustomerRecord record = getCustomerRecordByTariff(ttx.getTariffSpec(),
                                                       ttx.getCustomerInfo());
@@ -379,6 +367,7 @@ implements PortfolioManager, Initializable, Activatable
    */
   public synchronized void handleMessage (TariffRevoke tr)
   {
+    addPendingMessage("TariffRevoke", tr);
     Broker source = tr.getBroker();
     log.info("Revoke tariff " + tr.getTariffId()
              + " from " + tr.getBroker().getUsername());
@@ -412,6 +401,32 @@ implements PortfolioManager, Initializable, Activatable
     log.info("BalancingControlEvent " + bce.getKwh());
   }
 
+  // Adds a message to the correct pendingMessage list
+  private void addPendingMessage (String type, Object msg)
+  {
+    int current = timeslotRepo.currentSerialNumber();
+    Map<String, List<Object>> map = pendingMessages.get(current);
+    if (null == map) {
+      pendingMessages.put(current, new HashMap<String, List<Object>>());
+    }
+    List<Object> msgs = pendingMessages.get(current).get(type);
+    if (null == msgs) {
+      msgs = new ArrayList<Object>();
+      pendingMessages.get(current).put(type, msgs);
+    }
+    msgs.add(msg);
+  }
+
+  /**
+   * Retrieves pending messages for the current timeslot.
+   */
+  public Map<String, List<Object>> getPendingMessageLists ()
+  {
+    // Clean up old messages
+    pendingMessages.remove(timeslotRepo.currentSerialNumber() - 3);
+    return pendingMessages.get(timeslotRepo.currentSerialNumber());
+  }
+  
   // --------------- activation -----------------
   /**
    * Called after TimeslotComplete msg received. Note that activation order
@@ -423,19 +438,6 @@ implements PortfolioManager, Initializable, Activatable
     // This is where we respond to the next-timeslot request by notifying waiting threads
     for (CustomerRecord record: notifyOnActivation)
       record.activate();
-    notifyAll();
-  }
-  
-  /**
-   * Come here to wait for activation
-   */
-  public void waitForActivation ()
-  {
-    try {
-      wait();
-    } catch (InterruptedException ie) {
-      log.error("Interrupted during timeslot {}", timeslotRepo.currentSerialNumber());
-    }
   }
   
   // ------------- test-support methods ----------------

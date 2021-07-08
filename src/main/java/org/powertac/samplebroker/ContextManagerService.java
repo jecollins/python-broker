@@ -29,8 +29,10 @@ import org.powertac.common.Competition;
 import org.powertac.common.Timeslot;
 import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.DistributionReport;
+import org.powertac.common.msg.MarketBootstrapData;
 import org.powertac.common.repo.TimeslotRepo;
 import org.powertac.samplebroker.core.BrokerPropertiesService;
+import org.powertac.samplebroker.interfaces.Activatable;
 import org.powertac.samplebroker.interfaces.BrokerContext;
 import org.powertac.samplebroker.interfaces.Initializable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,7 +44,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ContextManagerService
-implements Initializable
+implements Initializable, Activatable
 {
   static private Logger log = LogManager.getLogger(ContextManagerService.class);
 
@@ -118,6 +120,11 @@ implements Initializable
     postSingletonMessage("CustomerBootstrapData", cbd);
   }
 
+  public synchronized void handleMessage (MarketBootstrapData mbd)
+  {
+    postSingletonMessage("CustomerBootstrapData", mbd);
+  }
+
   /**
    * Receives the server configuration properties.
    */
@@ -136,6 +143,28 @@ implements Initializable
    */
   public Map<String, Object> getContextMessages ()
   {
+    // Clean up old messages
+    pendingMessages.remove(timeslotRepo.currentSerialNumber() - 3);
     return pendingMessages.get(timeslotRepo.currentTimeslot());
   }
+  
+  // per-timeslot activation
+  /**
+   * Come here to wait for activation
+   */
+  public void waitForActivation ()
+  {
+    try {
+      wait();
+    } catch (InterruptedException ie) {
+      log.error("Interrupted during timeslot {}", timeslotRepo.currentSerialNumber());
+    }
+  }
+
+  @Override
+  public void activate (int timeslot)
+  {
+    notifyAll();    
+  }
+
 }
