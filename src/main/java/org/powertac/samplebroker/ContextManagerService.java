@@ -54,7 +54,7 @@ implements Initializable, Activatable
   @Autowired
   private TimeslotRepo timeslotRepo;
 
-  BrokerContext master;
+  private BrokerContext broker;
 
   // current cash balance
   private double cash = 0;
@@ -67,7 +67,7 @@ implements Initializable, Activatable
   @Override
   public void initialize (BrokerContext broker)
   {
-    master = broker;
+    this.broker = broker;
     propertiesService.configureMe(this);
     pendingMessages = new HashMap<>();
   }
@@ -167,4 +167,11 @@ implements Initializable, Activatable
     notifyAll();    
   }
 
+  /**
+   * Sends a message to the server
+   */
+  public void sendMessage (Object message)
+  {
+    broker.sendMessage(message);
+  }
 }
