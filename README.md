@@ -1,7 +1,7 @@
-Power TAC Sample Broker
+Power TAC Python Sample Broker
 =======================
 
-The sample broker is intended to help broker developers by providing both a foundation that interfaces correctly with the Power TAC infrastructure, and an example of a working broker agent. It handles all message types and operates in both wholesale and retail markets. It issues a set of tariffs as soon as possible, one for each PowerType detected in the customer records given in the bootstrap dataset. It then trades in the wholesale market using essentially the same strategy as the default broker. 
+The python sample broker is intended to help broker developers by providing a Java-based foundation that interfaces correctly with the Power TAC infrastructure, and makes all incoming messages available through a client API intended to be accessible using JPype. It handles all message types for both wholesale and retail markets. 
 
 Without changing anything, the current version assumes the server is running on localhost, and is not picky about passwords. You can change the server URL by editing the broker.properties file, or by using your own properties file. Passwords are generally ignored outside a tournament environment.
 
