@@ -113,7 +113,7 @@ implements PortfolioManager, Initializable, Activatable
   private List<CustomerRecord> notifyOnActivation = new ArrayList<>();
   
   // Map for recording per-timeslot messages
-  private Map<Integer, Map<String, List<Object>>> pendingMessages;
+  private Map<String, List<Object>> pendingMessages;
 
 
   // Configurable parameters for tariff composition
@@ -404,15 +404,13 @@ implements PortfolioManager, Initializable, Activatable
   // Adds a message to the correct pendingMessage list
   private void addPendingMessage (String type, Object msg)
   {
-    int current = timeslotRepo.currentSerialNumber();
-    Map<String, List<Object>> map = pendingMessages.get(current);
-    if (null == map) {
-      pendingMessages.put(current, new HashMap<String, List<Object>>());
+    if (null == pendingMessages) {
+      pendingMessages = new HashMap<String, List<Object>>();
     }
-    List<Object> msgs = pendingMessages.get(current).get(type);
+    List<Object> msgs = pendingMessages.get(type);
     if (null == msgs) {
       msgs = new ArrayList<Object>();
-      pendingMessages.get(current).put(type, msgs);
+      pendingMessages.put(type, msgs);
     }
     msgs.add(msg);
   }
@@ -423,8 +421,9 @@ implements PortfolioManager, Initializable, Activatable
   public Map<String, List<Object>> getPendingMessageLists ()
   {
     // Clean up old messages
-    pendingMessages.remove(timeslotRepo.currentSerialNumber() - 3);
-    return pendingMessages.get(timeslotRepo.currentSerialNumber());
+    Map<String, List<Object>> result = pendingMessages;
+    pendingMessages = null;
+    return result;
   }
   
   // --------------- activation -----------------
@@ -438,6 +437,17 @@ implements PortfolioManager, Initializable, Activatable
     // This is where we respond to the next-timeslot request by notifying waiting threads
     for (CustomerRecord record: notifyOnActivation)
       record.activate();
+  }
+
+  // ------------- access to Spring services ------------------
+  public CustomerRepo getCustomerRepo ()
+  {
+    return customerRepo;
+  }
+
+  public TariffRepo getTariffRepo ()
+  {
+    return tariffRepo;
   }
   
   // ------------- test-support methods ----------------

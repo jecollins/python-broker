@@ -26,12 +26,20 @@ import org.apache.logging.log4j.LogManager;
 import org.powertac.common.BankTransaction;
 import org.powertac.common.CashPosition;
 import org.powertac.common.Competition;
+import org.powertac.common.TimeService;
 import org.powertac.common.Timeslot;
 import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.DistributionReport;
 import org.powertac.common.msg.MarketBootstrapData;
+import org.powertac.common.msg.SimEnd;
+import org.powertac.common.msg.SimStart;
+import org.powertac.common.repo.CustomerRepo;
 import org.powertac.common.repo.TimeslotRepo;
+import org.powertac.common.repo.WeatherForecastRepo;
+import org.powertac.common.repo.WeatherReportRepo;
 import org.powertac.samplebroker.core.BrokerPropertiesService;
+import org.powertac.samplebroker.core.BrokerRunner;
+import org.powertac.samplebroker.core.PowerTacBroker;
 import org.powertac.samplebroker.interfaces.Activatable;
 import org.powertac.samplebroker.interfaces.BrokerContext;
 import org.powertac.samplebroker.interfaces.Initializable;
@@ -49,10 +57,22 @@ implements Initializable, Activatable
   static private Logger log = LogManager.getLogger(ContextManagerService.class);
 
   @Autowired
+  private PowerTacBroker powerTacBroker;
+
+  @Autowired
   private BrokerPropertiesService propertiesService;
 
   @Autowired
+  private TimeService timeService;
+
+  @Autowired
   private TimeslotRepo timeslotRepo;
+  
+  @Autowired
+  private WeatherReportRepo weatherReportRepo;
+  
+  @Autowired
+  private WeatherForecastRepo weatherForecastRepo;
 
   private BrokerContext broker;
 
@@ -60,8 +80,19 @@ implements Initializable, Activatable
   private double cash = 0;
 
   // Stored messages
-  private Map<Integer, Map<String, Object>> pendingMessages;
+  private Map<String, Object> pendingMessages;
   
+  // synchronizing objects for session start, timeslot complete
+  Object startSync;
+  Object tcSync;
+  boolean started = false;
+  
+  public ContextManagerService ()
+  {
+    super();
+    startSync = new Object();
+    tcSync = new Object();
+  }
 
 //  @SuppressWarnings("unchecked")
   @Override
@@ -76,6 +107,48 @@ implements Initializable, Activatable
   //
   // Note that these arrive in JMS threads; If they share data with the
   // agent processing thread, they need to be synchronized.
+  /**
+   * Start-of-session message
+   */
+  public void handleMessage (SimStart ss)
+  {
+    synchronized(startSync) {
+      log.info("SimStart");
+      started = true;
+      startSync.notifyAll();
+      log.info("startSync.notifyAll()");
+    }
+  }
+  
+  /**
+   * Python comes here to wait for sim-start
+   */
+  public void waitForStart ()
+  {
+    log.info("Waiting for start");
+    synchronized(startSync) {
+      while (!started) {
+        try {
+          log.info("Sync waiting for start");
+          startSync.wait();
+          log.info("startSync.wait() returns");
+        } catch (InterruptedException ie) {
+          log.error("Sync interrupted");
+          System.exit(1);
+        }
+      }
+    }
+    log.info("Started");
+  }
+  
+  /**
+   * End-of-session message
+   */
+  public void handleMessage (SimEnd se)
+  {
+    log.info("SimEnd");
+    postSingleMessage("SimEnd", se);
+  }
 
   /**
    * BankTransaction represents an interest payment. Value is positive for 
@@ -83,7 +156,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (BankTransaction btx)
   {
-    postSingletonMessage("BankTransaction", btx); // should be only one
+    postSingleMessage("BankTransaction", btx); // should be only one
   }
 
   /**
@@ -91,7 +164,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (CashPosition cp)
   {
-    postSingletonMessage("CashPosition", cp);
+    postSingleMessage("CashPosition", cp);
     cash = cp.getBalance();
     log.info("Cash position: " + cash);
   }
@@ -102,7 +175,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (DistributionReport dr)
   {
-    postSingletonMessage("DistributionReport", dr);
+    postSingleMessage("DistributionReport", dr);
   }
   
   /**
@@ -112,17 +185,20 @@ implements Initializable, Activatable
    */
   public void handleMessage (Competition comp)
   {
-    postSingletonMessage("Competition", comp);
+    log.info("Competition {}", comp.getId());
+    postSingleMessage("Competition", comp);
   }
 
   public synchronized void handleMessage (CustomerBootstrapData cbd)
   {
-    postSingletonMessage("CustomerBootstrapData", cbd);
+    log.info("CustomerBootstrapData");
+    postSingleMessage("CustomerBootstrapData", cbd);
   }
 
   public synchronized void handleMessage (MarketBootstrapData mbd)
   {
-    postSingletonMessage("CustomerBootstrapData", mbd);
+    log.info("MarketBootstrapData");
+    postSingleMessage("CustomerBootstrapData", mbd);
   }
 
   /**
@@ -130,41 +206,64 @@ implements Initializable, Activatable
    */
   public void handleMessage (java.util.Properties serverProps)
   {
-    postSingletonMessage("Properties", serverProps);
+    log.info("ServerProps");
+    postSingleMessage("Properties", serverProps);
   }
 
-  private void postSingletonMessage(String type, Object msg)
+  private void postSingleMessage(String type, Object msg)
   {
-    pendingMessages.get(timeslotRepo.currentSerialNumber()).put(type, msg); // should be only one
+    if (null == pendingMessages) {
+      pendingMessages = new HashMap<String, Object>();
+    }
+    pendingMessages.put(type, msg); // should be only one
   }
   
   /**
-   * Returns the <type message> map for the current timeslot.
+   * Waits for timeslot-complete, then returns the <type message> map for the current timeslot after
+   * clearing out the pending message list. So you can only do this once/timeslot.
    */
   public Map<String, Object> getContextMessages ()
   {
-    // Clean up old messages
-    pendingMessages.remove(timeslotRepo.currentSerialNumber() - 3);
-    return pendingMessages.get(timeslotRepo.currentTimeslot());
+    log.info("getContextMessages");
+    Map<String, Object> result = pendingMessages;
+    log.info("Returning {} messages", result.size());
+    pendingMessages = null;
+    return result;
   }
   
-  // per-timeslot activation
-  /**
-   * Come here to wait for activation
-   */
-  public void waitForActivation ()
+  // Test connection by posting a log message
+  public void logTest (String msg)
   {
-    try {
-      wait();
-    } catch (InterruptedException ie) {
-      log.error("Interrupted during timeslot {}", timeslotRepo.currentSerialNumber());
-    }
+    log.info("Log test: {}", msg);
   }
 
+  // called on TimeslotComplete
+  int lastCompleteTimeslot = -1;
   @Override
   public void activate (int timeslot)
   {
-    notifyAll();    
+    log.info("activate {}", timeslot);
+    synchronized(tcSync) {
+      lastCompleteTimeslot = timeslotRepo.currentSerialNumber();
+      tcSync.notifyAll();
+    }
+  }
+  
+  
+  public int waitForTc (int lastTimeslotIndex)
+  {
+    int result = 0;
+    synchronized(tcSync) {
+      while (lastTimeslotIndex >= lastCompleteTimeslot) {
+        try {
+          tcSync.wait();
+          result = lastCompleteTimeslot;
+        } catch (InterruptedException ie) {
+          log.error("Interrupted during timeslot {}", timeslotRepo.currentSerialNumber());
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -173,5 +272,26 @@ implements Initializable, Activatable
   public void sendMessage (Object message)
   {
     broker.sendMessage(message);
+  }
+
+  // ================== Access to Spring services ===================
+  public TimeService getTimeService ()
+  {
+    return timeService;
+  }
+
+  public TimeslotRepo getTimeslotRepo ()
+  {
+    return timeslotRepo;
+  }
+
+  public WeatherReportRepo getWeatherReportRepo ()
+  {
+    return weatherReportRepo;
+  }
+
+  public WeatherForecastRepo getWeatherForecastRepo ()
+  {
+    return weatherForecastRepo;
   }
 }

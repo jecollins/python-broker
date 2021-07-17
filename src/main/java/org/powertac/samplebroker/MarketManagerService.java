@@ -106,7 +106,7 @@ implements MarketManager, Initializable, Activatable
   private double meanMarketPrice = 0.0;
   
   // Map for recording per-timeslot messages
-  private Map<Integer, Map<String, List<Object>>> pendingMessages;
+  private Map<String, List<Object>> pendingMessages;
 
   public MarketManagerService ()
   {
@@ -288,15 +288,13 @@ implements MarketManager, Initializable, Activatable
   // Adds a message to the correct pendingMessage list
   private void addPendingMessage (String type, Object msg)
   {
-    int current = timeslotRepo.currentSerialNumber();
-    Map<String, List<Object>> map = pendingMessages.get(current);
-    if (null == map) {
-      pendingMessages.put(current, new HashMap<String, List<Object>>());
+    if (null == pendingMessages) {
+      pendingMessages = new HashMap<String, List<Object>>();
     }
-    List<Object> msgs = pendingMessages.get(current).get(type);
+    List<Object> msgs = pendingMessages.get(type);
     if (null == msgs) {
       msgs = new ArrayList<Object>();
-      pendingMessages.get(current).put(type, msgs);
+      pendingMessages.put(type, msgs);
     }
     msgs.add(msg);
   }
@@ -306,9 +304,10 @@ implements MarketManager, Initializable, Activatable
    */
   public Map<String, List<Object>> getPendingMessageLists ()
   {
-    // Clean up old messages
-    pendingMessages.remove(timeslotRepo.currentSerialNumber() - 3);
-    return pendingMessages.get(timeslotRepo.currentSerialNumber());
+    // Save result, clean up old messages
+    Map<String, List<Object>> result = pendingMessages;
+    pendingMessages = null;
+    return result;
   }
 
   // ----------- per-timeslot activation ---------------
