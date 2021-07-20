@@ -248,6 +248,11 @@ public class Envoy
     public void run()
     {
       log.info("Delay thread started");
+      try {
+        Thread.sleep(900);
+      } catch (InterruptedException ie) {
+        log.error("Start sleep interrupted");
+      }
       signalRunning();
       while (true) {
         waitForStart();
