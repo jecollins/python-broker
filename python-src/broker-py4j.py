@@ -19,19 +19,20 @@ args[0] = '--log-suffix'
 args[1] = '-py'
 print('args:', args[0], args[1])
 
-# broker should now be logging into the server. Once it's logged in, we
-# need to retrieve service references
+# Retrieve references to the context, portfolio, and market managers
 contextManager = envoy.getSpringService('org.powertac.samplebroker.ContextManagerService')
-contextManager.logTest("Spring access confirmed");
-
+#contextManager.logTest("Spring access confirmed");
 portfolioManager = envoy.getSpringService('org.powertac.samplebroker.PortfolioManagerService')
 marketManager = envoy.getSpringService('org.powertac.samplebroker.MarketManagerService')
-
 timeslotRepo = contextManager.getTimeslotRepo()
 
+# Start the broker
 print('Starting session')
 envoy.startSession(args)
+# broker should now be logging into the server.
 print('Session started')
+
+# broker is now logged in, wait for SimStart message to arrive
 contextManager.logTest("Start of session");
 contextManager.waitForStart()
 print('Sim started!')
