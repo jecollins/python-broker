@@ -11,7 +11,7 @@ from py4j.java_gateway import JavaGateway
 import time
 
 # open the gateway with our classpath. Requires the broker to be packaged
-gateway = JavaGateway().launch_gateway(classpath='../target/passthrough-broker-1.9.0-SNAPSHOT.jar')
+gateway = JavaGateway().launch_gateway(classpath='../target/python-broker-1.9.0-SNAPSHOT.jar')
 # connect to the JVM
 envoy = gateway.jvm.org.powertac.samplebroker.Envoy.getInstance()
 #envoy = gateway.entry_point.getEnvoy()

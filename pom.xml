@@ -5,11 +5,11 @@
 
   <modelVersion>4.0.0</modelVersion>
 
-  <artifactId>passthrough-broker</artifactId>
+  <artifactId>python-broker</artifactId>
   <packaging>jar</packaging>
 
-  <name>passthrough-broker</name>
-  <description>Pass-through broker implementation</description>
+  <name>python-broker</name>
+  <description>Python broker implementation</description>
   <url>http://www.powertac.org/</url>
 
   <parent>
