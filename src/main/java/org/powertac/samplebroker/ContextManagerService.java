@@ -28,6 +28,8 @@ import org.powertac.common.CashPosition;
 import org.powertac.common.Competition;
 import org.powertac.common.TimeService;
 import org.powertac.common.Timeslot;
+import org.powertac.common.WeatherForecast;
+import org.powertac.common.WeatherReport;
 import org.powertac.common.msg.CustomerBootstrapData;
 import org.powertac.common.msg.DistributionReport;
 import org.powertac.common.msg.MarketBootstrapData;
@@ -80,18 +82,20 @@ implements Initializable, Activatable
   private double cash = 0;
 
   // Stored messages
-  private Map<String, Object> pendingMessages;
+  private Map<String, List<Object>> pendingMessages;
   
   // synchronizing objects for session start, timeslot complete
-  Object startSync;
-  Object tcSync;
-  boolean started = false;
+  private Object startSync;
+  private Object tcSync;
+  private boolean started;
+  private boolean ended;
   
   public ContextManagerService ()
   {
     super();
     startSync = new Object();
     tcSync = new Object();
+    started = false;
   }
 
 //  @SuppressWarnings("unchecked")
@@ -101,6 +105,8 @@ implements Initializable, Activatable
     this.broker = broker;
     propertiesService.configureMe(this);
     pendingMessages = new HashMap<>();
+    Envoy envoy = Envoy.getInstance();
+    envoy.registerService("ContextManager", this);
   }
 
   // -------------------- message handlers ---------------------
@@ -116,10 +122,11 @@ implements Initializable, Activatable
       log.info("SimStart");
       started = true;
       startSync.notifyAll();
-      log.info("startSync.notifyAll()");
+      log.info("startSync.notifyAll(), started = {}", started);
     }
+    log.info("After SimStart started = {}", started);
   }
-  
+
   /**
    * Python comes here to wait for sim-start
    */
@@ -140,6 +147,15 @@ implements Initializable, Activatable
     }
     log.info("Started");
   }
+
+  /**
+   * Python comes here to check for sim-start
+   */
+  public boolean checkForStart ()
+  {
+    log.info("checkForStart {}", started);
+    return started;
+  }
   
   /**
    * End-of-session message
@@ -147,7 +163,16 @@ implements Initializable, Activatable
   public void handleMessage (SimEnd se)
   {
     log.info("SimEnd");
-    postSingleMessage("SimEnd", se);
+    addPendingMessage("SimEnd", se);
+    ended = true;
+  }
+  
+  /**
+   * Returns true if SimEnd has been received
+   */
+  public boolean isEnded ()
+  {
+    return ended;
   }
 
   /**
@@ -156,7 +181,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (BankTransaction btx)
   {
-    postSingleMessage("BankTransaction", btx); // should be only one
+    addPendingMessage("BankTransaction", btx); // should be only one
   }
 
   /**
@@ -164,7 +189,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (CashPosition cp)
   {
-    postSingleMessage("CashPosition", cp);
+    addPendingMessage("CashPosition", cp);
     cash = cp.getBalance();
     log.info("Cash position: " + cash);
   }
@@ -175,7 +200,7 @@ implements Initializable, Activatable
    */
   public void handleMessage (DistributionReport dr)
   {
-    postSingleMessage("DistributionReport", dr);
+    addPendingMessage("DistributionReport", dr);
   }
   
   /**
@@ -186,19 +211,19 @@ implements Initializable, Activatable
   public void handleMessage (Competition comp)
   {
     log.info("Competition {}", comp.getId());
-    postSingleMessage("Competition", comp);
+    addPendingMessage("Competition", comp);
   }
 
   public synchronized void handleMessage (CustomerBootstrapData cbd)
   {
     log.info("CustomerBootstrapData");
-    postSingleMessage("CustomerBootstrapData", cbd);
+    addPendingMessage("CustomerBootstrapData", cbd);
   }
 
   public synchronized void handleMessage (MarketBootstrapData mbd)
   {
     log.info("MarketBootstrapData");
-    postSingleMessage("CustomerBootstrapData", mbd);
+    addPendingMessage("MarketBootstrapData", mbd);
   }
 
   /**
@@ -207,26 +232,44 @@ implements Initializable, Activatable
   public void handleMessage (java.util.Properties serverProps)
   {
     log.info("ServerProps");
-    postSingleMessage("Properties", serverProps);
+    addPendingMessage("Properties", serverProps);
+  }
+  
+  public void handleMessage (WeatherReport report)
+  {
+    log.info("Weather report {}", report.getTimeslotIndex());
+    addPendingMessage("WeatherReport", report);
+  }
+  
+  public void handleMessage (WeatherForecast fcst)
+  {
+    log.info("Weather forecast");
+    addPendingMessage("WeatherForecast", fcst);
   }
 
-  private void postSingleMessage(String type, Object msg)
+  private void addPendingMessage(String type, Object msg)
   {
     if (null == pendingMessages) {
-      pendingMessages = new HashMap<String, Object>();
+      pendingMessages = new HashMap<String, List<Object>>();
     }
-    pendingMessages.put(type, msg); // should be only one
+    List<Object> msgs = pendingMessages.get(type);
+    if (null == msgs) {
+      msgs = new ArrayList<Object>();
+      pendingMessages.put(type, msgs);
+    }
+    log.info("Adding {}", type);
+    msgs.add(msg);
   }
   
   /**
    * Waits for timeslot-complete, then returns the <type message> map for the current timeslot after
    * clearing out the pending message list. So you can only do this once/timeslot.
    */
-  public Map<String, Object> getContextMessages ()
+  public Map<String, List<Object>> getContextMessages ()
   {
     log.info("getContextMessages");
-    Map<String, Object> result = pendingMessages;
-    log.info("Returning {} messages", result.size());
+    Map<String, List<Object>> result = pendingMessages;
+    log.info("Returning {} message lists", result.size());
     pendingMessages = null;
     return result;
   }
@@ -250,7 +293,7 @@ implements Initializable, Activatable
   }
   
   
-  public int waitForTc (int lastTimeslotIndex)
+  public int waitForTimeslotComplete (int lastTimeslotIndex)
   {
     int result = 0;
     synchronized(tcSync) {

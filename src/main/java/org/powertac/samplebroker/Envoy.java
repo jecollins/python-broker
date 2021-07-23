@@ -15,12 +15,13 @@
  */
 package org.powertac.samplebroker;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.logging.log4j.LogManager;
 import py4j.GatewayServer;
 import org.apache.logging.log4j.Logger;
 import org.powertac.samplebroker.core.BrokerRunner;
-import org.springframework.context.support.AbstractApplicationContext;
-import org.springframework.context.support.ClassPathXmlApplicationContext;
 
 /**
  * Provides access to Spring services and the ability to start the broker in a thread without
@@ -33,6 +34,8 @@ public class Envoy
   private static Logger log = LogManager.getLogger(Envoy.class);
   
   private static Envoy instance;
+  
+  private Map<String, Object> services;
   
   /**
    * main() method is how the py4j gateway gets set up.
@@ -47,26 +50,44 @@ public class Envoy
   public Envoy ()
   {
     super();
+    services = new HashMap<>();
   }
   
   /**
-   * Returns reference to Envoy instance to Python code
+   * Returns singleton reference to Envoy instance
    */
-  public Envoy getEnvoy ()
+  public static Envoy getInstance ()
   {
+    if (null == instance) {
+      instance = new Envoy();
+    }
     return instance;
   }
-
-  public Object getSpringService (String classname)
+  
+  /**
+   * Access to services. We don't use the application context, because we don't want duplicate
+   * instances. Note that this won't work until the services have been instantiated and have
+   * registered themselves.
+   */
+  public void registerService (String name, Object service)
   {
-    try {
-      Class<?> clazz = Class.forName(classname);
-      AbstractApplicationContext context = BrokerRunner.getApplicationContext();
-      return context.getBeansOfType(clazz).values().toArray()[0];
-    } catch (ClassNotFoundException cnf) {
-      System.out.println("Class " + classname + " not found");
-      return null;
+    log.info("Registered {}", name);
+    services.put(name, service);
+  }
+
+  public Object getService (String classname)
+  {
+    // give Spring some time to start up
+    while (services.size() < 3) {
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException ie) {
+        log.error("Sleep interrupted");
+      }
     }
+    Object result = services.get(classname);
+    log.info("returning {}", result.getClass().getCanonicalName());
+    return result;
   }
 
   /**
@@ -264,5 +285,15 @@ public class Envoy
         proceed();
       }
     }
+  }
+  
+  public boolean returnTrue ()
+  {
+    return true;
+  }
+  
+  public boolean returnFalse ()
+  {
+    return false;
   }
 }

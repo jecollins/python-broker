@@ -16,4 +16,8 @@ envoy = gateway.jvm.org.powertac.samplebroker.Envoy()
 
 envoy.startDelay()
 result = envoy.waitForDelay()
-print ('result = {}', result)
+print ('result', result)
+
+print('true', envoy.returnTrue())
+print('false', envoy.returnFalse())
+

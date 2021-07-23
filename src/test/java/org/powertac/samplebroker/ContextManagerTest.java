@@ -21,13 +21,16 @@ class ContextManagerTest
   @Test
   void testHandleMessageSimStartA ()
   {
+    assertFalse(uut.checkForStart());
     SimStart msg = new SimStart(null);
-    MessageSender sender = new MessageSender(msg, 3000);
+    //MessageSender sender = new MessageSender(msg, 3000);
     System.out.println("starting");
-    sender.start();
+    dispatch(uut, "handleMessage", msg);
+    //sender.start();
     System.out.println("started");
-    uut.waitForStart();
-    System.out.println("startSync complete");
+    //uut.waitForStart();
+    //System.out.println("startSync complete");
+    assertTrue(uut.checkForStart());
   }
 
   class MessageSender extends Thread

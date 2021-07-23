@@ -151,6 +151,8 @@ implements PortfolioManager, Initializable, Activatable
     customerSubscriptions = new LinkedHashMap<>();
     competingTariffs = new HashMap<>();
     notifyOnActivation.clear();
+    Envoy envoy = Envoy.getInstance();
+    envoy.registerService("PortfolioManager", this);
   }
   
   // -------------- data access ------------------
@@ -421,6 +423,7 @@ implements PortfolioManager, Initializable, Activatable
   public Map<String, List<Object>> getPendingMessageLists ()
   {
     // Clean up old messages
+    log.info("getPortfolioMessages {}", (pendingMessages != null) ? pendingMessages.size(): 0);
     Map<String, List<Object>> result = pendingMessages;
     pendingMessages = null;
     return result;

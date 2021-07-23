@@ -122,15 +122,8 @@ implements MarketManager, Initializable, Activatable
     this.broker = broker;
     lastOrder = new HashMap<>();
     propertiesService.configureMe(this);
-    System.out.println("  name=" + broker.getBrokerUsername());
-    //if (seedNumber != null) {
-    //  System.out.println("  seeding=" + seedNumber);
-    //  log.info("Seeding with : " + seedNumber);
-    //  randomGen = new Random(seedNumber);
-    //}
-    //else {
-    //  randomGen = new Random();
-    //}
+    Envoy envoy = Envoy.getInstance();
+    envoy.registerService("MarketManager", this);
   }
 
   // ----------------- data access -------------------
@@ -305,6 +298,7 @@ implements MarketManager, Initializable, Activatable
   public Map<String, List<Object>> getPendingMessageLists ()
   {
     // Save result, clean up old messages
+    log.info("getMarketMessages {}", (pendingMessages != null) ? pendingMessages.size(): 0);
     Map<String, List<Object>> result = pendingMessages;
     pendingMessages = null;
     return result;
