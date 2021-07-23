@@ -29,7 +29,7 @@ Note that using the --repeat-count and --repeat-hours features from the Java bro
 Building the Java core
 ----------------------
 
-Before you can run the Python broker, you need the Java core to be packaged as a .jar file in the target directory. You to this using Mavan, as
+Before you can run the Python broker, you need the Java core to be packaged as a .jar file in the target directory. You to this using Maven, as
 
 `mvn clean package`
 
