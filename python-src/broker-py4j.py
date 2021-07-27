@@ -10,6 +10,35 @@
 from py4j.java_gateway import JavaGateway
 import time
 
+def makeTariff ():
+    marketPrice = marketManager.getMeanMarketPrice() / 1000 # in $/kWh
+    margin = 0.1 #10% markup
+    # we'll make a simple CONSUMPTION tariff for now
+    rateValue = marketPrice * (1.0 + margin)
+    periodicValue = 1.0
+    broker = contextManager.getBroker()
+    ptConsumption = gateway.jvm.org.powertac.common.enumerations.PowerType.CONSUMPTION
+    spec = gateway.jvm.org.powertac.common.TariffSpecification(broker, ptConsumption)
+    spec.withPeriodicPayment(periodicValue)
+    rate = gateway.jvm.org.powertac.common.Rate()
+    rate.withValue(rateValue)
+    spec.addRate()
+    tariffRepo.addSpecification(spec)
+    contextManager.sendMessage(spec)
+    print('Offered tariff for {}/kWh + {} daily fixed charge'
+          .format(rateValue, periodicValue))
+
+def checkSubscriptions (messages):
+    tts = messages['TariffTransaction']
+    if not tts is None:
+        for tt in tts:
+            if tt.getTxType == org.powertac.common.TariffTransaction.Type.SIGNUP:
+                print('New subscription from {}, population {}'
+                      .format(tt.getCustomerInfo().getName(), tt.getCustomerCount()))
+            elif tt.getTxType == org.powertac.common.TariffTransaction.Type.WITHDRAW:
+                print('{} withdraws {}'
+                      .format(tt.getCustomerInfo().getName(), tt.getCustomerCount()))
+
 # open the gateway with our classpath. Requires the broker to be packaged
 gateway = JavaGateway().launch_gateway(classpath='../target/python-broker-1.9.0-SNAPSHOT.jar')
 # connect to the JVM
@@ -37,7 +66,7 @@ print('Services acquired')
 
 # broker is now logged in, wait for SimStart message to arrive
 contextManager.waitForStart()
-print('Sim started!')
+print('Sim started')
 
 # we should now be able to pull down the CustomerBootstrapData and MarketBootstrapData
 bootstrapMessages = contextManager.getContextMessages()
@@ -52,14 +81,21 @@ while not contextManager.isEnded():
     ts = contextManager.waitForTimeslotComplete(ts)
     print("timeslot", ts)
     contextMessages = contextManager.getContextMessages()
-    # messages should be a dict
+    # messages should be a dict of lists
     timeslot = timeslotRepo.currentSerialNumber()
     print('{} context message lists'.format(len(contextMessages)))
     for type in contextMessages:
         print('  {}:{}'.format(type, len(contextMessages[type])))
+
     portfolioMessages = portfolioManager.getPendingMessageLists()
     if not portfolioMessages is None:
         print('{} portfolio message lists'.format(len(portfolioMessages)))
+    if timeslot == 362:
+        # offer a tariff
+        makeTariff()
+    if not portfolioMessages is None:
+        checkSubscriptions(portfolioMessages)
+
     marketMessages = marketManager.getPendingMessageLists()
     if not marketMessages is None:
         print('{} market message lists'.format(len(marketMessages)))

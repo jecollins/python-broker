@@ -24,6 +24,7 @@ import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.powertac.common.BankTransaction;
+import org.powertac.common.Broker;
 import org.powertac.common.CashPosition;
 import org.powertac.common.Competition;
 import org.powertac.common.TimeService;
@@ -318,6 +319,11 @@ implements Initializable, Activatable
   }
 
   // ================== Access to Spring services ===================
+  public Broker getBroker()
+  {
+    return broker.getBroker();
+  }
+
   public TimeService getTimeService ()
   {
     return timeService;

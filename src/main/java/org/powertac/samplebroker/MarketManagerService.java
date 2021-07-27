@@ -252,22 +252,6 @@ implements MarketManager, Initializable, Activatable
   {
     addPendingMessage("Orderbook", orderbook);
   }
-  
-  /**
-   * Receives a new WeatherForecast.
-   */
-  public synchronized void handleMessage (WeatherForecast forecast)
-  {
-    addPendingMessage("WeatherForecast", forecast);
-  }
-
-  /**
-   * Receives a new WeatherReport.
-   */
-  public synchronized void handleMessage (WeatherReport report)
-  {
-    addPendingMessage("WeatherReport", report);
-  }
 
   /**
    * Receives a BalanceReport containing information about imbalance in the
